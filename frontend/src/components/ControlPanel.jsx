@@ -23,14 +23,31 @@ const ControlPanel = () => {
           <ArrowLeftRight size={15} /> Play as {playerColor === 'w' ? 'Black' : 'White'}
         </button>
       </div>
-      <button
-        onClick={undoMove}
-        disabled={history.length < 2}
-        className="btn btn-secondary"
-        style={{ opacity: history.length < 2 ? 0.4 : 1 }}
-      >
-        <Undo2 size={15} /> Undo Move
-      </button>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button
+          onClick={undoMove}
+          disabled={history.length < 2}
+          className="btn btn-secondary"
+          style={{ flex: 1, opacity: history.length < 2 ? 0.4 : 1 }}
+        >
+          <Undo2 size={15} /> Undo Move
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              const res = await fetch('http://127.0.0.1:5000/api/train', { method: 'POST' });
+              const data = await res.json();
+              alert(data.status);
+            } catch (e) {
+              alert('Failed to start training. Is backend online?');
+            }
+          }}
+          className="btn btn-primary"
+          style={{ flex: 1, background: '#10b981' }}
+        >
+          Train AI
+        </button>
+      </div>
     </div>
   );
 };
