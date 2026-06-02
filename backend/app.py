@@ -1,12 +1,12 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO
-from backend.db.database import engine, Base, SessionLocal
-from backend.db.models import AIStats
-from backend.ai.neural_net import ChessAlphaZeroNet
-from backend.ai.mcts import MCTS
-from backend.chess_engine.board import ChessBoard
-from backend.ai.trainer import AlphaZeroTrainer
+from db.database import engine, Base, SessionLocal
+from db.models import AIStats
+from ai.neural_net import ChessAlphaZeroNet
+from ai.mcts import MCTS
+from chess_engine.board import ChessBoard
+from ai.trainer import AlphaZeroTrainer
 
 import os
 import torch

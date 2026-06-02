@@ -1,7 +1,8 @@
+import chess
 import numpy as np
-from backend.chess_engine.board import ChessBoard
-from backend.chess_engine.rules import encode_board
-from backend.ai.mcts import MCTS
+from chess_engine.board import ChessBoard
+from chess_engine.rules import encode_board
+from ai.mcts import MCTS
 
 def execute_episode(neural_net, num_mcts_sims=800):
     """

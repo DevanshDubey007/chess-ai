@@ -1,9 +1,11 @@
 import { create } from 'zustand';
 import { Chess } from 'chess.js';
 
+const initialGame = new Chess();
+
 const useGameStore = create((set, get) => ({
-  game: new Chess(),
-  fen: 'start',
+  game: initialGame,
+  fen: initialGame.fen(),
   history: [],
   isPlayerTurn: true,
   playerColor: 'w',
@@ -13,21 +15,47 @@ const useGameStore = create((set, get) => ({
   makeMove: (move) => {
     const { game } = get();
     try {
-      const moveResult = game.move(move);
-      if (moveResult) {
-        set({ 
-          fen: game.fen(), 
+      const result = game.move(move);
+      if (result) {
+        const isOver = game.isGameOver();
+        let gameResult = null;
+        if (isOver) {
+          if (game.isCheckmate()) {
+            gameResult = game.turn() === 'w' ? 'Black Wins!' : 'White Wins!';
+          } else if (game.isDraw()) {
+            gameResult = 'Draw';
+          } else if (game.isStalemate()) {
+            gameResult = 'Stalemate';
+          } else {
+            gameResult = 'Game Over';
+          }
+        }
+        set({
+          fen: game.fen(),
           history: game.history({ verbose: true }),
-          isGameOver: game.isGameOver(),
-          gameResult: game.isGameOver() ? (game.isCheckmate() ? (game.turn() === 'w' ? 'Black wins' : 'White wins') : 'Draw') : null,
+          isGameOver: isOver,
+          gameResult,
           isPlayerTurn: game.turn() === get().playerColor
         });
         return true;
       }
     } catch (e) {
-      return false;
+      console.warn('Invalid move:', move, e);
     }
     return false;
+  },
+
+  undoMove: () => {
+    const { game } = get();
+    game.undo();
+    game.undo(); // Undo both player and AI move
+    set({
+      fen: game.fen(),
+      history: game.history({ verbose: true }),
+      isGameOver: false,
+      gameResult: null,
+      isPlayerTurn: true
+    });
   },
 
   resetGame: () => {
@@ -43,7 +71,11 @@ const useGameStore = create((set, get) => ({
   },
 
   setPlayerColor: (color) => {
-    set({ playerColor: color, isPlayerTurn: color === get().game.turn() });
+    const { game } = get();
+    set({
+      playerColor: color,
+      isPlayerTurn: color === game.turn()
+    });
   }
 }));
 

@@ -6,15 +6,21 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
       colors: {
         dark: {
-          900: '#111827',
-          800: '#1f2937',
-          700: '#374151',
+          900: '#0b0f19',
+          800: '#131a2b',
+          700: '#1c2640',
         },
         primary: {
+          300: '#93c5fd',
+          400: '#60a5fa',
           500: '#3b82f6',
           600: '#2563eb',
+          700: '#1d4ed8',
         }
       }
     },

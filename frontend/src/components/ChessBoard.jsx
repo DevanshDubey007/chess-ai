@@ -4,14 +4,18 @@ import useGameStore from '../store/gameStore';
 import { useAI } from '../hooks/useAI';
 
 const ChessBoardComponent = () => {
-  const { fen, makeMove, isPlayerTurn, playerColor, isGameOver } = useGameStore();
-  const { isThinking } = useAI();
-  const [boardWidth, setBoardWidth] = useState(400);
+  const fen = useGameStore((s) => s.fen);
+  const makeMove = useGameStore((s) => s.makeMove);
+  const isPlayerTurn = useGameStore((s) => s.isPlayerTurn);
+  const playerColor = useGameStore((s) => s.playerColor);
+  const isGameOver = useGameStore((s) => s.isGameOver);
+  const { isThinking, error } = useAI();
+  const [boardWidth, setBoardWidth] = useState(480);
 
   useEffect(() => {
     const handleResize = () => {
       const width = window.innerWidth;
-      if (width < 640) setBoardWidth(width - 40);
+      if (width < 640) setBoardWidth(Math.min(width - 32, 400));
       else if (width < 1024) setBoardWidth(480);
       else setBoardWidth(560);
     };
@@ -21,37 +25,49 @@ const ChessBoardComponent = () => {
   }, []);
 
   const onDrop = (sourceSquare, targetSquare, piece) => {
-    if (!isPlayerTurn || isGameOver) return false;
+    if (!isPlayerTurn || isGameOver || isThinking) return false;
 
-    // See if the move is legal
     const move = {
       from: sourceSquare,
       to: targetSquare,
-      promotion: piece[1].toLowerCase() ?? 'q', // default to queen for simplicity
+      promotion: 'q', // always promote to queen
     };
 
-    const success = makeMove(move);
-    return success;
+    return makeMove(move);
   };
 
   return (
-    <div className="flex flex-col items-center justify-center p-4">
-      <div className={`relative rounded-xl overflow-hidden shadow-2xl transition-all duration-300 ${isThinking ? 'opacity-80' : 'opacity-100'}`}>
-        <Chessboard 
-          position={fen} 
-          onPieceDrop={onDrop} 
+    <div className="flex flex-col items-center justify-center p-3">
+      <div
+        className="relative rounded-xl overflow-hidden transition-all duration-300"
+        style={{
+          boxShadow: '0 0 60px rgba(59,130,246,0.15), 0 8px 32px rgba(0,0,0,0.5)',
+        }}
+      >
+        <Chessboard
+          id="main-board"
+          position={fen}
+          onPieceDrop={onDrop}
           boardWidth={boardWidth}
           boardOrientation={playerColor === 'w' ? 'white' : 'black'}
-          customDarkSquareStyle={{ backgroundColor: '#4b5563' }}
-          customLightSquareStyle={{ backgroundColor: '#e5e7eb' }}
-          animationDuration={300}
+          customDarkSquareStyle={{ backgroundColor: '#334155' }}
+          customLightSquareStyle={{ backgroundColor: '#cbd5e1' }}
+          animationDuration={250}
         />
         {isThinking && (
-           <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-30 z-10 backdrop-blur-sm">
-             <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-primary-500"></div>
-           </div>
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-14 w-14 border-4 border-transparent border-t-blue-400 border-r-blue-400"></div>
+              <span className="text-sm text-blue-200 font-medium">AI is thinking...</span>
+            </div>
+          </div>
         )}
       </div>
+      {error && (
+        <div className="mt-3 text-red-400 text-sm text-center bg-red-900/20 rounded-lg px-4 py-2 border border-red-800/30">
+          {error}
+        </div>
+      )}
     </div>
   );
 };

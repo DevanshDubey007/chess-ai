@@ -1,11 +1,12 @@
 import math
+import chess
 import numpy as np
 import torch
 import torch.nn.functional as F
 from collections import defaultdict
-from backend.chess_engine.board import ChessBoard
-from backend.chess_engine.rules import encode_board
-from backend.chess_engine.zobrist import compute_zobrist_hash
+from chess_engine.board import ChessBoard
+from chess_engine.rules import encode_board
+from chess_engine.zobrist import compute_zobrist_hash
 
 class MCTSNode:
     def __init__(self, prior_prob, parent=None):

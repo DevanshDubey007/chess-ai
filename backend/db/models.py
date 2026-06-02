@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime
 from datetime import datetime
-from backend.db.database import Base
+from db.database import Base
 
 class GameHistory(Base):
     __tablename__ = "games"
