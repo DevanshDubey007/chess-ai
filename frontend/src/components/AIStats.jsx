@@ -5,46 +5,42 @@ const AIStats = () => {
   const [stats, setStats] = useState(null);
 
   useEffect(() => {
-    let mounted = true;
-    const fetchStats = async () => {
+    let alive = true;
+    const load = async () => {
       try {
-        const data = await getAIStats();
-        if (mounted) setStats(data);
-      } catch (err) {
-        console.error("Failed to load stats", err);
-      }
+        const d = await getAIStats();
+        if (alive) setStats(d);
+      } catch { /* backend offline */ }
     };
-    fetchStats();
-    // Refresh stats every 10 seconds
-    const interval = setInterval(fetchStats, 10000);
-    return () => {
-      mounted = false;
-      clearInterval(interval);
-    };
+    load();
+    const id = setInterval(load, 10000);
+    return () => { alive = false; clearInterval(id); };
   }, []);
 
-  if (!stats) return <div className="glass-panel p-4 animate-pulse h-32 w-full max-w-sm"></div>;
-
   return (
-    <div className="glass-panel p-4 w-full max-w-sm">
-      <h3 className="text-lg font-semibold mb-3 text-primary-500 border-b border-gray-700 pb-2 flex items-center justify-between">
+    <div className="glass-panel" style={{ padding: 16, width: '100%', maxWidth: 340 }}>
+      <h3 style={{ margin: 0, marginBottom: 12, fontSize: 15, fontWeight: 600, color: '#60a5fa', borderBottom: '1px solid rgba(255,255,255,.08)', paddingBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>AlphaZero AI</span>
-        <span className="text-xs bg-primary-600 px-2 py-1 rounded-full text-white">v{stats.checkpoint_version}</span>
+        {stats && <span style={{ fontSize: 10, background: '#2563eb', padding: '2px 8px', borderRadius: 99, color: '#fff' }}>v{stats.checkpoint_version}</span>}
       </h3>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col">
-          <span className="text-gray-400 text-xs uppercase tracking-wider">Estimated ELO</span>
-          <span className="text-2xl font-bold text-white">{stats.elo}</span>
+      {stats ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>ELO</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.elo}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>Win Rate</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{(stats.win_rate * 100).toFixed(1)}%</div>
+          </div>
+          <div style={{ gridColumn: 'span 2' }}>
+            <div style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>Games Played</div>
+            <div style={{ fontSize: 18, fontWeight: 500, color: '#d1d5db' }}>{stats.games_played.toLocaleString()}</div>
+          </div>
         </div>
-        <div className="flex flex-col">
-          <span className="text-gray-400 text-xs uppercase tracking-wider">Win Rate</span>
-          <span className="text-2xl font-bold text-white">{(stats.win_rate * 100).toFixed(1)}%</span>
-        </div>
-        <div className="flex flex-col col-span-2">
-          <span className="text-gray-400 text-xs uppercase tracking-wider">Games Played (Self-Play)</span>
-          <span className="text-xl font-medium text-gray-200">{stats.games_played.toLocaleString()}</span>
-        </div>
-      </div>
+      ) : (
+        <p style={{ color: '#6b7280', fontSize: 13 }}>Backend offline — stats unavailable</p>
+      )}
     </div>
   );
 };

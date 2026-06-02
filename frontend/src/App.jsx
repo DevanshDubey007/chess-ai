@@ -6,50 +6,74 @@ import ControlPanel from './components/ControlPanel';
 import useGameStore from './store/gameStore';
 
 function App() {
-  const gameResult = useGameStore((s) => s.gameResult);
-  const isGameOver = useGameStore((s) => s.isGameOver);
+  const gameResult = useGameStore(s => s.gameResult);
+  const isGameOver = useGameStore(s => s.isGameOver);
 
   return (
-    <div className="min-h-screen flex flex-col items-center py-10 px-4"
-         style={{ background: 'linear-gradient(135deg, #0b0f19 0%, #131a2b 50%, #0b0f19 100%)' }}>
-
-      <header className="mb-8 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight"
-            style={{ background: 'linear-gradient(to right, #60a5fa, #93c5fd)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0b0f19 0%, #131a2b 50%, #0b0f19 100%)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      padding: '40px 16px',
+    }}>
+      {/* Header */}
+      <header style={{ marginBottom: 32, textAlign: 'center' }}>
+        <h1 style={{
+          fontSize: 36,
+          fontWeight: 800,
+          letterSpacing: '-0.02em',
+          background: 'linear-gradient(to right, #60a5fa, #93c5fd)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          margin: 0,
+        }}>
           AlphaZero Chess
         </h1>
-        <p className="text-gray-400 mt-2 text-sm max-w-md mx-auto">
+        <p style={{ color: '#9ca3af', marginTop: 8, fontSize: 14, maxWidth: 420 }}>
           Play against a neural network trained entirely through self-play using Monte Carlo Tree Search.
         </p>
       </header>
 
-      <div className="w-full max-w-6xl flex flex-col lg:flex-row gap-8 justify-center items-start">
-
-        {/* Left Column */}
-        <div className="flex flex-col gap-6 w-full lg:w-72 order-2 lg:order-1 items-center lg:items-end">
+      {/* Main layout */}
+      <div style={{
+        width: '100%',
+        maxWidth: 1100,
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 28,
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+      }}>
+        {/* Left — Stats & History */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, width: 280, minWidth: 240 }}>
           <AIStats />
           <MoveHistory />
         </div>
 
-        {/* Center - Board */}
-        <div className="flex flex-col items-center order-1 lg:order-2">
-          <div className="glass-panel p-2">
+        {/* Center — Board */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          <div className="glass-panel" style={{ padding: 8 }}>
             <ChessBoardComponent />
           </div>
 
           {isGameOver && (
-            <div className="mt-6 glass-panel p-4 w-full text-center"
-                 style={{ border: '2px solid #3b82f6', boxShadow: '0 0 30px rgba(59,130,246,0.3)' }}>
-              <h2 className="text-2xl font-bold text-white">{gameResult}</h2>
+            <div className="glass-panel" style={{
+              padding: '14px 28px',
+              textAlign: 'center',
+              border: '2px solid #3b82f6',
+              boxShadow: '0 0 30px rgba(59,130,246,.35)',
+            }}>
+              <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#fff' }}>{gameResult}</h2>
             </div>
           )}
         </div>
 
-        {/* Right Column */}
-        <div className="flex flex-col gap-6 w-full lg:w-72 order-3 items-center lg:items-start">
+        {/* Right — Controls */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, width: 280, minWidth: 240 }}>
           <ControlPanel />
         </div>
-
       </div>
     </div>
   );

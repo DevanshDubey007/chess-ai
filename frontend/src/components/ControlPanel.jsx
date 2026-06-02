@@ -1,23 +1,35 @@
 import React from 'react';
 import useGameStore from '../store/gameStore';
-import { RefreshCw, ArrowLeftRight } from 'lucide-react';
+import { RefreshCw, ArrowLeftRight, Undo2 } from 'lucide-react';
 
 const ControlPanel = () => {
-  const { resetGame, playerColor, setPlayerColor } = useGameStore();
+  const resetGame    = useGameStore(s => s.resetGame);
+  const undoMove     = useGameStore(s => s.undoMove);
+  const playerColor  = useGameStore(s => s.playerColor);
+  const setPlayerColor = useGameStore(s => s.setPlayerColor);
+  const history      = useGameStore(s => s.history);
 
   return (
-    <div className="glass-panel p-4 w-full max-w-sm flex gap-3">
-      <button 
-        onClick={resetGame}
-        className="flex-1 flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-lg transition-colors font-medium text-sm"
+    <div className="glass-panel" style={{ padding: 16, width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button onClick={resetGame} className="btn btn-secondary" style={{ flex: 1 }}>
+          <RefreshCw size={15} /> New Game
+        </button>
+        <button
+          onClick={() => setPlayerColor(playerColor === 'w' ? 'b' : 'w')}
+          className="btn btn-primary"
+          style={{ flex: 1 }}
+        >
+          <ArrowLeftRight size={15} /> Play as {playerColor === 'w' ? 'Black' : 'White'}
+        </button>
+      </div>
+      <button
+        onClick={undoMove}
+        disabled={history.length < 2}
+        className="btn btn-secondary"
+        style={{ opacity: history.length < 2 ? 0.4 : 1 }}
       >
-        <RefreshCw size={16} /> New Game
-      </button>
-      <button 
-        onClick={() => setPlayerColor(playerColor === 'w' ? 'b' : 'w')}
-        className="flex-1 flex items-center justify-center gap-2 bg-primary-600 hover:bg-primary-500 text-white py-2 rounded-lg transition-colors font-medium text-sm shadow-lg shadow-primary-500/20"
-      >
-        <ArrowLeftRight size={16} /> Play as {playerColor === 'w' ? 'Black' : 'White'}
+        <Undo2 size={15} /> Undo Move
       </button>
     </div>
   );
