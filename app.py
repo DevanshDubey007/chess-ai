@@ -12,5 +12,8 @@ backend_app = importlib.util.module_from_spec(spec)
 sys.modules["backend_app"] = backend_app
 spec.loader.exec_module(backend_app)
 
-# 3. Expose the Flask app object so gunicorn can find it
 app = backend_app.app
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
