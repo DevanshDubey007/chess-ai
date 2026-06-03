@@ -2,145 +2,161 @@ import math
 import chess
 import numpy as np
 import torch
-import torch.nn.functional as F
-from collections import defaultdict
-from chess_engine.board import ChessBoard
-from chess_engine.rules import encode_board
-from chess_engine.zobrist import compute_zobrist_hash
+from .neural_net import board_to_tensor, MOVE_TO_IDX, IDX_TO_MOVE
+
+C_PUCT      = 1.4   # exploration constant
+DIRICHLET_A = 0.3   # noise alpha (0.3 = chess standard)
+DIRICHLET_E = 0.25  # noise weight
 
 class MCTSNode:
-    def __init__(self, prior_prob, parent=None):
-        self.parent = parent
-        self.children = {} # action (UCI move) -> MCTSNode
-        self.visit_count = 0
-        self.value_sum = 0
-        self.prior_prob = prior_prob
-        
+    __slots__ = ['board', 'parent', 'move', 'children',
+                 'visits', 'value_sum', 'prior', 'is_expanded']
+
+    def __init__(self, board, parent=None, move=None, prior=0.0):
+        self.board      = board
+        self.parent     = parent
+        self.move       = move          # move that led to this node
+        self.children   = {}
+        self.visits     = 0
+        self.value_sum  = 0.0
+        self.prior      = prior
+        self.is_expanded = False
+
     @property
-    def q_value(self):
-        if self.visit_count == 0:
-            return 0
-        return self.value_sum / self.visit_count
+    def Q(self):
+        if self.visits == 0:
+            return 0.0
+        return self.value_sum / self.visits
+
+    def UCB(self, parent_visits):
+        return self.Q + C_PUCT * self.prior * math.sqrt(parent_visits) / (1 + self.visits)
 
 class MCTS:
-    def __init__(self, neural_net, num_simulations=800, c_puct=1.0, dirichlet_alpha=0.3, dirichlet_epsilon=0.25):
-        self.net = neural_net
-        self.num_simulations = num_simulations
-        self.c_puct = c_puct
-        self.dirichlet_alpha = dirichlet_alpha
-        self.dirichlet_epsilon = dirichlet_epsilon
-        self.transposition_table = {} # hash -> (value, policy_probs)
+    def __init__(self, model, simulations=150, temperature=1.0):
+        self.model       = model
+        self.simulations = simulations
+        self.temperature = temperature  # > 0 = varied play, 0 = deterministic
 
-    def search(self, initial_state: ChessBoard, add_noise=True):
-        root = MCTSNode(0)
-        
-        # Initial expansion of the root
-        policy, value = self.evaluate(initial_state)
-        legal_moves = initial_state.get_legal_moves_uci()
-        
-        # Add Dirichlet noise to root for exploration
-        if add_noise and len(legal_moves) > 0:
-            noise = np.random.dirichlet([self.dirichlet_alpha] * len(legal_moves))
-            for i, move in enumerate(legal_moves):
-                p = (1 - self.dirichlet_epsilon) * policy.get(move, 0) + self.dirichlet_epsilon * noise[i]
-                root.children[move] = MCTSNode(p, root)
-        else:
-            for move in legal_moves:
-                root.children[move] = MCTSNode(policy.get(move, 0), root)
-                
-        for _ in range(self.num_simulations):
-            node = root
-            state = initial_state.copy()
-            
-            # Selection
-            while len(node.children) > 0:
-                action, node = self.select_child(node)
-                state.push_uci(action)
-                
-            # Expansion and Evaluation
-            if not state.is_game_over():
-                policy, value = self.evaluate(state)
-                legal_moves = state.get_legal_moves_uci()
-                for move in legal_moves:
-                    node.children[move] = MCTSNode(policy.get(move, 0), node)
-            else:
-                # Terminal state value
-                result = state.result()
-                if result == '1-0':
-                    value = 1 if state.board.turn == chess.BLACK else -1
-                elif result == '0-1':
-                    value = -1 if state.board.turn == chess.BLACK else 1
-                else:
-                    value = 0 # Draw
-                    
-            # Backpropagation
-            self.backpropagate(node, value)
-            
-        # Return action probabilities based on visit counts
-        action_probs = {}
-        for action, child in root.children.items():
-            action_probs[action] = child.visit_count / (root.visit_count - 1 + 1e-8)
-            
-        return action_probs
+    def get_move(self, board: chess.Board) -> str:
+        root = MCTSNode(board.copy())
+        self._expand(root)
+        self._add_dirichlet_noise(root)  # KEY: adds variation at root
 
-    def select_child(self, node):
-        best_score = -float('inf')
-        best_action = None
-        best_child = None
-        
-        for action, child in node.children.items():
-            # PUCT formula
-            u = self.c_puct * child.prior_prob * math.sqrt(node.visit_count) / (1 + child.visit_count)
-            # We negate child Q because it's the value for the *other* player
-            q = -child.q_value
-            score = q + u
-            
-            if score > best_score:
-                best_score = score
-                best_action = action
-                best_child = child
-                
-        return best_action, best_child
+        for _ in range(self.simulations):
+            node = self._select(root)
+            value = self._evaluate(node)
+            self._backprop(node, value)
 
-    def evaluate(self, state: ChessBoard):
-        """Returns policy (dict of move -> prob) and value (-1 to 1)"""
-        z_hash = compute_zobrist_hash(state.board)
-        if z_hash in self.transposition_table:
-            return self.transposition_table[z_hash]
-            
-        board_tensor = encode_board(state.board)
-        # Convert to torch tensor, add batch dimension
-        x = torch.from_numpy(board_tensor).unsqueeze(0)
+        return self._pick_move(root)
         
-        # Move to same device as net
-        device = next(self.net.parameters()).device
-        x = x.to(device)
-        
-        self.net.eval()
+    def _get_root_children(self, board: chess.Board):
+        # Helper to get the root's evaluated children for training probabilities
+        root = MCTSNode(board.copy())
+        self._expand(root)
+        self._add_dirichlet_noise(root)
+        for _ in range(self.simulations):
+            node = self._select(root)
+            value = self._evaluate(node)
+            self._backprop(node, value)
+        return root.children.items()
+
+    def _select(self, node):
+        while node.is_expanded and node.children:
+            node = max(
+                node.children.values(),
+                key=lambda n: n.UCB(node.visits)
+            )
+        if not node.board.is_game_over():
+            self._expand(node)
+        return node
+
+    def _expand(self, node):
+        if node.is_expanded:
+            return
+        board  = node.board
+        tensor = board_to_tensor(board)
+
         with torch.no_grad():
-            pi_logits, v = self.net(x)
-            
-        pi_probs = F.softmax(pi_logits, dim=1).squeeze(0).cpu().numpy()
-        value = v.item()
-        
-        # Mask illegal moves (simplified matching index, requires mapping UCI to AlphaZero action space)
-        # For full implementation, we need a function to map 4672 AlphaZero action index to UCI move
-        # Here we do a mocked policy dictionary for demonstration
-        policy = {}
-        legal_moves = state.get_legal_moves_uci()
-        
-        # Fake mapping: uniform probability over legal moves, mixed with network output if we had full mapping
-        for move in legal_moves:
-            # In reality we extract the exact index for 'move' from pi_probs
-            policy[move] = 1.0 / len(legal_moves)
-            
-        self.transposition_table[z_hash] = (policy, value)
-        return policy, value
+            policy_logits, _ = self.model(tensor)
 
-    def backpropagate(self, node, value):
+        policy = torch.softmax(policy_logits[0], dim=0).numpy()
+
+        legal_moves = list(board.legal_moves)
+        legal_ucis  = {m.uci(): m for m in legal_moves}
+
+        total_prior = 0.0
+        priors = {}
+        for uci, move in legal_ucis.items():
+            idx   = MOVE_TO_IDX.get(uci, 0)
+            p     = float(policy[idx])
+            priors[uci] = p
+            total_prior += p
+
+        # Normalize
+        if total_prior > 0:
+            priors = {k: v / total_prior for k, v in priors.items()}
+        else:
+            priors = {k: 1.0 / len(legal_ucis) for k in legal_ucis}
+
+        for uci, move in legal_ucis.items():
+            child_board = board.copy()
+            child_board.push(move)
+            node.children[uci] = MCTSNode(
+                child_board, parent=node, move=uci, prior=priors[uci]
+            )
+
+        node.is_expanded = True
+
+    def _evaluate(self, node):
+        if node.board.is_game_over():
+            result = node.board.result()
+            if result == "1-0":
+                return 1.0 if node.board.turn == chess.BLACK else -1.0
+            elif result == "0-1":
+                return -1.0 if node.board.turn == chess.BLACK else 1.0
+            return 0.0  # draw
+
+        tensor = board_to_tensor(node.board)
+        with torch.no_grad():
+            _, value = self.model(tensor)
+        return float(value[0][0])
+
+    def _backprop(self, node, value):
         while node is not None:
-            node.visit_count += 1
+            node.visits    += 1
             node.value_sum += value
-            node = node.parent
-            # Flip value for the opponent
-            value = -value
+            value           = -value   # flip for opponent
+            node            = node.parent
+
+    def _add_dirichlet_noise(self, root):
+        """This is what gives the AI VARIATION — different moves each game."""
+        if not root.children:
+            return
+        n      = len(root.children)
+        noise  = np.random.dirichlet([DIRICHLET_A] * n)
+        for child, eta in zip(root.children.values(), noise):
+            child.prior = (1 - DIRICHLET_E) * child.prior + DIRICHLET_E * eta
+
+    def _pick_move(self, root) -> str:
+        """
+        Temperature controls variation:
+        - temperature=1.0  → proportional to visit counts (varied, creative)
+        - temperature=0.1  → near-deterministic (strong endgame play)
+        - temperature=0.0  → always best move (tournament mode)
+        """
+        visits = {uci: node.visits for uci, node in root.children.items()}
+
+        if self.temperature == 0 or not visits:
+            return max(visits, key=visits.get)
+
+        visit_arr = np.array(list(visits.values()), dtype=np.float64)
+        visit_arr = visit_arr ** (1.0 / self.temperature)
+        
+        # Prevent sum to zero if all visits are zero
+        total_visits = visit_arr.sum()
+        if total_visits > 0:
+            probs = visit_arr / total_visits
+            probs = probs / np.sum(probs) # Strict normalization for numpy
+            return np.random.choice(list(visits.keys()), p=probs)
+        else:
+            return np.random.choice(list(visits.keys()))

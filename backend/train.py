@@ -1,75 +1,87 @@
 import os
+import time
 import torch
-from ai.neural_net import ChessAlphaZeroNet
-from ai.trainer import AlphaZeroTrainer
-from ai.replay_buffer import ReplayBuffer
-from ai.self_play import execute_episode
-from db.database import SessionLocal
-from db.models import AIStats
+from ai.neural_net import get_model, MOVE_TO_IDX
+from ai.self_play import self_play_game, load_replay_buffer, save_replay_buffer, train_model, CHECKPOINT_PATH
 
 def train():
-    print("Initializing AlphaZero Training Pipeline...")
+    print("=" * 60)
+    print("  AlphaZero Self-Play Training Pipeline")
+    print("=" * 60)
     
-    # Initialize components
-    net = ChessAlphaZeroNet()
-    trainer = AlphaZeroTrainer(net)
-    buffer = ReplayBuffer(capacity=50000) # Reduced capacity for local training memory constraints
+    # Load or create model
+    model = get_model(CHECKPOINT_PATH)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
     
-    # Load existing checkpoint if available
-    checkpoint_path = "D:/chess-ai/backend/models/checkpoint.pt"
-    if os.path.exists(checkpoint_path):
-        print("Loading existing model checkpoint...")
-        trainer.load_checkpoint(filepath=checkpoint_path)
-    else:
-        print("No checkpoint found. Starting with random weights.")
-        trainer.save_checkpoint(filepath=checkpoint_path)
-        
-    num_iterations = 1000
-    episodes_per_iteration = 10
-    batch_size = 256
+    # Load optimizer state if checkpoint exists
+    if os.path.exists(CHECKPOINT_PATH):
+        try:
+            ckpt = torch.load(CHECKPOINT_PATH, map_location='cpu', weights_only=False)
+            if 'optimizer_state_dict' in ckpt:
+                optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+                print("[Init] Loaded optimizer from checkpoint")
+        except Exception as e:
+            print(f"[Init] Starting fresh optimizer: {e}")
     
-    db = SessionLocal()
-    stats = db.query(AIStats).first()
-    if not stats:
-        stats = AIStats(elo=1200, games_played=0, win_rate=0.0)
-        db.add(stats)
-        db.commit()
+    buffer = load_replay_buffer()
+    print(f"[Init] Replay buffer size: {len(buffer)}")
+    print(f"[Init] Policy output size: {len(MOVE_TO_IDX)} moves")
+    print(f"[Init] Device: CPU")
+    print()
 
-    print(f"Starting training on device: {trainer.device}")
-    
-    for iteration in range(num_iterations):
-        print(f"\n--- Iteration {iteration + 1}/{num_iterations} ---")
-        
-        # 1. Self-Play Phase
-        print(f"Starting Self-Play ({episodes_per_iteration} games)...")
-        for episode in range(episodes_per_iteration):
-            # We use 100 simulations for speed during local testing (AlphaZero used 800)
-            game_history = execute_episode(net, num_mcts_sims=50) 
-            buffer.save_game(game_history)
-            
-            stats.games_played += 1
-            if (episode + 1) % 2 == 0:
-                print(f"  Completed {episode + 1}/{episodes_per_iteration} games. Buffer size: {len(buffer)}")
-                
-        db.commit()
+    games_per_iteration = 3    # Self-play games per cycle
+    train_steps = 50           # Gradient steps per cycle
+    batch_size = 64            # Smaller batch for faster start
+    mcts_sims = 10             # Low sims = fast games (~2-3 min each)
+    iteration = 0
 
-        # 2. Training Phase
+    print("[Mode] CONTINUOUS training — runs forever until you close this window")
+    print("[Tip]  Press Ctrl+C anytime to stop safely\n")
+
+    while True:
+        iteration += 1
+        print(f"\n{'='*60}")
+        print(f"  CYCLE {iteration} (running forever...)")
+        print(f"{'='*60}")
+        
+        # ---- Phase 1: Self-Play ----
+        print(f"\n[Phase 1] Self-Play: generating {games_per_iteration} games...")
+        for game_num in range(1, games_per_iteration + 1):
+            t0 = time.time()
+            game_data = self_play_game(model, simulations=mcts_sims)
+            elapsed = time.time() - t0
+            buffer.extend(game_data)
+            print(f"  Game {game_num}/{games_per_iteration} | "
+                  f"Moves: {len(game_data)} | "
+                  f"Time: {elapsed:.1f}s | "
+                  f"Buffer: {len(buffer)}")
+
+        save_replay_buffer(buffer)
+        print(f"\n[Phase 1] Done. Buffer saved ({len(buffer)} positions)")
+
+        # ---- Phase 2: Training ----
         if len(buffer) >= batch_size:
-            print("Starting Network Training...")
-            # Train for a few epochs on the newly gathered data
-            for epoch in range(5): 
-                states, policies, values = buffer.sample_batch(batch_size=batch_size)
-                total_loss, pi_loss, v_loss = trainer.train_step(states, policies, values)
-                
-            print(f"  Training Loss: Total={total_loss:.4f}, Policy={pi_loss:.4f}, Value={v_loss:.4f}")
+            print(f"\n[Phase 2] Training neural network ({train_steps} steps)...")
+            model = train_model(model, optimizer, buffer, 
+                              batch_size=batch_size, steps=train_steps)
             
             # Save checkpoint
-            print("Saving new model checkpoint...")
-            trainer.save_checkpoint(filepath=checkpoint_path)
-            stats.checkpoint_version += 1
-            db.commit()
+            os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'buffer_size': len(buffer),
+                'iteration': iteration,
+            }, CHECKPOINT_PATH)
+            print(f"[Phase 2] Checkpoint saved (cycle {iteration})")
         else:
-            print(f"Not enough data to train yet. Need {batch_size}, have {len(buffer)}.")
-            
-if __name__ == "__main__":
+            print(f"\n[Phase 2] Skipped — need {batch_size} positions, have {len(buffer)}")
+
+        print(f"\n  Summary: Buffer={len(buffer)} | Cycles completed={iteration}")
+
+    print("\n" + "=" * 60)
+    print("  Training complete!")
+    print("=" * 60)
+
+if __name__ == '__main__':
     train()

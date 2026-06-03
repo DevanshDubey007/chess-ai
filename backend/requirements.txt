@@ -1,9 +1,8 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
 flask==3.0.3
 flask-cors==4.0.1
-flask-socketio==5.3.6
-sqlalchemy==2.0.30
 python-chess==1.999
-torch==2.3.0
 numpy==1.26.4
-eventlet==0.36.1
-python-dotenv==1.0.1
+sqlalchemy==2.0.30
+gunicorn==22.0.0
