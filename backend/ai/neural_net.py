@@ -130,6 +130,14 @@ class ChessAlphaZeroNet(nn.Module):
 
         return p, v
 
+# Device detection
+if torch.cuda.is_available():
+    DEVICE = torch.device('cuda')
+elif torch.backends.mps.is_available():
+    DEVICE = torch.device('mps')
+else:
+    DEVICE = torch.device('cpu')
+
 def get_model(checkpoint_path=None):
     model = ChessAlphaZeroNet()
     model.eval()
@@ -145,6 +153,9 @@ def get_model(checkpoint_path=None):
                 print(f"[AI] Loaded checkpoint: {checkpoint_path}")
             except Exception as e:
                 print(f"[AI] Error loading checkpoint {checkpoint_path}, using fresh model: {e}")
-    # Optimize for CPU inference
-    torch.set_num_threads(4)
+    # Optimize for CPU inference if on CPU
+    if DEVICE.type == 'cpu':
+        torch.set_num_threads(4)
+        
+    model.to(DEVICE)
     return model

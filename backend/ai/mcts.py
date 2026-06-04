@@ -2,7 +2,7 @@ import math
 import chess
 import numpy as np
 import torch
-from .neural_net import board_to_tensor, MOVE_TO_IDX, IDX_TO_MOVE
+from .neural_net import board_to_tensor, MOVE_TO_IDX, IDX_TO_MOVE, DEVICE
 
 C_PUCT      = 1.4   # exploration constant
 DIRICHLET_A = 0.3   # noise alpha (0.3 = chess standard)
@@ -74,12 +74,12 @@ class MCTS:
         if node.is_expanded:
             return
         board  = node.board
-        tensor = board_to_tensor(board)
+        tensor = board_to_tensor(board).to(DEVICE)
 
         with torch.no_grad():
             policy_logits, _ = self.model(tensor)
 
-        policy = torch.softmax(policy_logits[0], dim=0).numpy()
+        policy = torch.softmax(policy_logits[0], dim=0).cpu().numpy()
 
         legal_moves = list(board.legal_moves)
         legal_ucis  = {m.uci(): m for m in legal_moves}
@@ -116,7 +116,7 @@ class MCTS:
                 return -1.0 if node.board.turn == chess.BLACK else 1.0
             return 0.0  # draw
 
-        tensor = board_to_tensor(node.board)
+        tensor = board_to_tensor(node.board).to(DEVICE)
         with torch.no_grad():
             _, value = self.model(tensor)
         return float(value[0][0])

@@ -2,7 +2,7 @@ import chess
 import numpy as np
 import torch
 import torch.nn.functional as F
-from .mcts import MCTS
+from .mcts import MCTS, MCTSNode
 from .neural_net import board_to_tensor, MOVE_TO_IDX, get_model
 import os
 import pickle
@@ -69,6 +69,15 @@ def self_play_game(model, simulations=150, verbose=True):
             side = "White" if not board.turn else "Black"  # flipped because we already pushed
             print(f"    Move {move_count}: {side} plays {move_uci}", end="\r")
 
+        # Check auto-resignation: if root value is heavily negative
+        root_value = mcts._evaluate(MCTSNode(board))
+        if root_value < -0.90:
+            if verbose:
+                side = "White" if board.turn else "Black"
+                print(f"    Move {move_count}: {side} resigns (eval {root_value:.2f})")
+            board.push(chess.Move.null()) # Dummy move to force outcome logic if needed, or just break
+            break
+
         # Cool down temperature after move 30 for stronger endgame
         if move_count == 30:
             mcts.temperature = 0.1
@@ -110,6 +119,8 @@ def save_replay_buffer(buffer):
 
 def train_model(model, optimizer, replay_buffer, batch_size=256, steps=100):
     """Train on replay buffer."""
+    from .neural_net import DEVICE
+    
     if len(replay_buffer) < batch_size:
         print(f"[Train] Not enough data yet: {len(replay_buffer)}/{batch_size}")
         return model
@@ -121,9 +132,9 @@ def train_model(model, optimizer, replay_buffer, batch_size=256, steps=100):
         indices = np.random.choice(len(replay_buffer), batch_size, replace=False)
         batch   = [replay_buffer[i] for i in indices]
 
-        tensors  = torch.cat([b[0] for b in batch])           # (B, 19, 8, 8)
-        policies = torch.FloatTensor(np.array([b[1] for b in batch]))   # (B, 4672)
-        values   = torch.FloatTensor(np.array([b[2] for b in batch])).unsqueeze(1)  # (B, 1)
+        tensors  = torch.cat([b[0] for b in batch]).to(DEVICE)           # (B, 19, 8, 8)
+        policies = torch.FloatTensor(np.array([b[1] for b in batch])).to(DEVICE)   # (B, 4672)
+        values   = torch.FloatTensor(np.array([b[2] for b in batch])).unsqueeze(1).to(DEVICE)  # (B, 1)
 
         policy_logits, value_preds = model(tensors)
 

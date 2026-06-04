@@ -1,11 +1,13 @@
 import os
 import time
 import torch
-from ai.neural_net import get_model, MOVE_TO_IDX
+from ai.neural_net import get_model, MOVE_TO_IDX, DEVICE
 from ai.self_play import self_play_game, load_replay_buffer, save_replay_buffer, train_model, CHECKPOINT_PATH
 from ai.monitor_state import log_message, set_status, set_cycle
 from db.database import SessionLocal, Base, engine, init_all_models
 from db.monitor_models import TrainingCycle, SelfPlayGame, MoveHeatmapData
+from concurrent.futures import ThreadPoolExecutor
+from torch.optim.lr_scheduler import StepLR
 
 
 def _update_heatmap(db, move_squares):
@@ -31,7 +33,8 @@ def train():
 
     # Load or create model
     model = get_model(CHECKPOINT_PATH)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.002, weight_decay=1e-4)
+    scheduler = StepLR(optimizer, step_size=50, gamma=0.5)
 
     # Load optimizer state if checkpoint exists
     if os.path.exists(CHECKPOINT_PATH):
@@ -46,13 +49,13 @@ def train():
     buffer = load_replay_buffer()
     log_message(f"[Init] Replay buffer size: {len(buffer)}")
     log_message(f"[Init] Policy output size: {len(MOVE_TO_IDX)} moves")
-    log_message(f"[Init] Device: CPU")
+    log_message(f"[Init] Device: {DEVICE.type.upper()}")
     log_message("")
 
-    games_per_iteration = 3    # Self-play games per cycle
-    train_steps = 50           # Gradient steps per cycle
-    batch_size = 64            # Smaller batch for faster start
-    mcts_sims = 10             # Low sims = fast games (~2-3 min each)
+    games_per_iteration = 8    # More games in parallel
+    train_steps = 100          # Gradient steps per cycle
+    batch_size = 128           # Larger batch size
+    mcts_sims = 50             # Better search depth
     iteration = 0
     prev_loss = None
     elo = 800
@@ -78,44 +81,53 @@ def train():
 
         db = SessionLocal()
 
-        for game_num in range(1, games_per_iteration + 1):
+        def play_one_game(game_num):
             t0 = time.time()
-            game_data, game_meta = self_play_game(model, simulations=mcts_sims)
+            data, meta = self_play_game(model, simulations=mcts_sims, verbose=False)
             elapsed = time.time() - t0
-            buffer.extend(game_data)
+            return game_num, data, meta, elapsed
 
-            result = game_meta["result"]
-            move_count = game_meta["moves"]
-            move_squares = game_meta["move_squares"]
+        # Run games in parallel
+        futures = []
+        max_workers = min(os.cpu_count() or 4, games_per_iteration)
+        log_message(f"  [Self-Play] Using {max_workers} threads...")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for game_num in range(1, games_per_iteration + 1):
+                futures.append(executor.submit(play_one_game, game_num))
+            
+            for future in futures:
+                game_num, game_data, game_meta, elapsed = future.result()
+                buffer.extend(game_data)
+    
+                result = game_meta["result"]
+                move_count = game_meta["moves"]
+                move_squares = game_meta["move_squares"]
+    
+                if result == "1-0":
+                    cycle_wins += 1
+                elif result == "0-1":
+                    cycle_losses += 1
+                else:
+                    cycle_draws += 1
+    
+                sp_game = SelfPlayGame(
+                    cycle_number=iteration,
+                    game_number=game_num,
+                    moves=move_count,
+                    result=result,
+                    time_seconds=round(elapsed, 2),
+                )
+                db.add(sp_game)
+                _update_heatmap(db, move_squares)
+    
+                log_message(
+                    f"  Game {game_num}/{games_per_iteration} | "
+                    f"Moves: {move_count} | Result: {result} | "
+                    f"Time: {elapsed:.1f}s | Buffer: {len(buffer)}"
+                )
 
-            # Track win/draw/loss
-            if result == "1-0":
-                cycle_wins += 1
-            elif result == "0-1":
-                cycle_losses += 1
-            else:
-                cycle_draws += 1
-
-            # Insert SelfPlayGame row
-            sp_game = SelfPlayGame(
-                cycle_number=iteration,
-                game_number=game_num,
-                moves=move_count,
-                result=result,
-                time_seconds=round(elapsed, 2),
-            )
-            db.add(sp_game)
-            db.commit()
-
-            # Update heatmap
-            _update_heatmap(db, move_squares)
-
-            log_message(
-                f"  Game {game_num}/{games_per_iteration} | "
-                f"Moves: {move_count} | Result: {result} | "
-                f"Time: {elapsed:.1f}s | Buffer: {len(buffer)}"
-            )
-
+        db.commit()
         save_replay_buffer(buffer)
         log_message(f"\n[Phase 1] Done. Buffer saved ({len(buffer)} positions)")
 
@@ -143,9 +155,9 @@ def train():
                 indices = np.random.choice(len(buffer), batch_size, replace=False)
                 batch = [buffer[i] for i in indices]
 
-                tensors = torch.cat([b[0] for b in batch])
-                policies = torch.FloatTensor(np.array([b[1] for b in batch]))
-                values = torch.FloatTensor(np.array([b[2] for b in batch])).unsqueeze(1)
+                tensors = torch.cat([b[0] for b in batch]).to(DEVICE)
+                policies = torch.FloatTensor(np.array([b[1] for b in batch])).to(DEVICE)
+                values = torch.FloatTensor(np.array([b[2] for b in batch])).unsqueeze(1).to(DEVICE)
 
                 policy_logits, value_preds = model(tensors)
 
@@ -162,6 +174,7 @@ def train():
                 step_policy += p_loss.item()
                 step_value += v_loss.item()
 
+            scheduler.step()
             model.eval()
 
             total_loss_val = step_total / train_steps
@@ -180,10 +193,11 @@ def train():
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
                 'buffer_size': len(buffer),
                 'iteration': iteration,
             }, CHECKPOINT_PATH)
-            log_message(f"[Phase 2] Checkpoint saved (cycle {iteration})")
+            log_message(f"[Phase 2] Checkpoint saved (cycle {iteration}). LR: {scheduler.get_last_lr()[0]:.5f}")
 
             # ELO estimation: +5 if loss decreased
             if prev_loss is not None and total_loss_val < prev_loss:
