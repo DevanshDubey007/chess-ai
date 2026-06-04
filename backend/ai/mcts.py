@@ -4,9 +4,15 @@ import numpy as np
 import torch
 from .neural_net import board_to_tensor, MOVE_TO_IDX, IDX_TO_MOVE, DEVICE
 
-C_PUCT      = 1.4   # exploration constant
+C_PUCT      = 2.5   # higher = more exploration of attacking moves
 DIRICHLET_A = 0.3   # noise alpha (0.3 = chess standard)
 DIRICHLET_E = 0.25  # noise weight
+
+# Material values for evaluation bonus
+PIECE_VALUES = {
+    chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3.25,
+    chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
+}
 
 class MCTSNode:
     __slots__ = ['board', 'parent', 'move', 'children',
@@ -108,18 +114,49 @@ class MCTS:
         node.is_expanded = True
 
     def _evaluate(self, node):
-        if node.board.is_game_over():
-            result = node.board.result()
+        board = node.board
+        if board.is_game_over():
+            result = board.result()
             if result == "1-0":
-                return 1.0 if node.board.turn == chess.BLACK else -1.0
+                return 1.0 if board.turn == chess.BLACK else -1.0
             elif result == "0-1":
-                return -1.0 if node.board.turn == chess.BLACK else 1.0
+                return -1.0 if board.turn == chess.BLACK else 1.0
             return 0.0  # draw
 
-        tensor = board_to_tensor(node.board).to(DEVICE)
+        tensor = board_to_tensor(board).to(DEVICE)
         with torch.no_grad():
             _, value = self.model(tensor)
-        return float(value[0][0])
+        nn_value = float(value[0][0])
+
+        # --- Material bonus: teaches the AI to capture pieces ---
+        white_material = 0
+        black_material = 0
+        for sq in chess.SQUARES:
+            piece = board.piece_at(sq)
+            if piece:
+                val = PIECE_VALUES.get(piece.piece_type, 0)
+                if piece.color == chess.WHITE:
+                    white_material += val
+                else:
+                    black_material += val
+        # Normalize material advantage to [-1, 1] range
+        mat_diff = (white_material - black_material) / 30.0
+        # Flip sign if it's black's turn (we evaluate from current player's perspective)
+        if board.turn == chess.BLACK:
+            mat_diff = -mat_diff
+
+        # --- Attack bonus: reward checks and threats ---
+        attack_bonus = 0.0
+        if board.is_check():
+            attack_bonus = 0.05  # reward delivering check
+        # Reward having more legal moves (mobility = aggression)
+        mobility = len(list(board.legal_moves))
+        mobility_bonus = min(mobility / 80.0, 0.1)  # small bonus, capped
+
+        # Blend: 50% neural net + 40% material + 10% tactics
+        # As the network gets smarter over training, it will dominate naturally
+        combined = 0.5 * nn_value + 0.4 * mat_diff + 0.05 * attack_bonus + 0.05 * mobility_bonus
+        return max(-1.0, min(1.0, combined))  # clamp to [-1, 1]
 
     def _backprop(self, node, value):
         while node is not None:

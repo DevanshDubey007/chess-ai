@@ -37,12 +37,21 @@ net = get_model(CHECKPOINT_PATH)
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     db = SessionLocal()
-    stats = db.query(AIStats).first()
-    if not stats:
-        stats = AIStats(elo=1200, games_played=0, win_rate=0.0)
-        db.add(stats)
-        db.commit()
-        db.refresh(stats)
+    
+    # Calculate stats from the new TrainingCycle tables
+    cycles = db.query(TrainingCycle).all()
+    
+    total_wins = sum(c.wins for c in cycles)
+    total_draws = sum(c.draws for c in cycles)
+    total_losses = sum(c.losses for c in cycles)
+    total_games = total_wins + total_draws + total_losses
+    
+    win_rate = 0.0
+    if total_games > 0:
+        win_rate = round((total_wins / total_games) * 100, 1)
+        
+    latest_cycle = cycles[-1] if cycles else None
+    current_elo = latest_cycle.elo if latest_cycle else 800
     
     buffer_size = 0
     if os.path.exists(CHECKPOINT_PATH):
@@ -54,10 +63,10 @@ def get_stats():
         
     db.close()
     return jsonify({
-        "elo": stats.elo,
-        "games_played": stats.games_played,
-        "win_rate": stats.win_rate,
-        "checkpoint_version": stats.checkpoint_version,
+        "elo": current_elo,
+        "games_played": total_games,
+        "win_rate": win_rate,
+        "checkpoint_version": len(cycles),
         "buffer_size": buffer_size
     })
 
@@ -75,9 +84,10 @@ def get_ai_move():
     if board.is_game_over():
         return jsonify({"error": "Game is over"}), 400
         
-    move_number = board.fullmove_number
-    temperature = 0.5 if move_number < 15 else 0.1
-    simulations = 30
+    # 100 sims = good moves without hanging the laptop
+    # temperature 0.1 = almost always pick the best move (no more random play)
+    simulations = 100
+    temperature = 0.1
     
     mcts = MCTS(net, simulations=simulations, temperature=temperature)
     best_move = mcts.get_move(board)

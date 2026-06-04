@@ -31,7 +31,7 @@ const AIStats = () => {
           </div>
           <div>
             <div style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>Win Rate</div>
-            <div style={{ fontSize: 22, fontWeight: 700 }}>{(stats.win_rate * 100).toFixed(1)}%</div>
+            <div style={{ fontSize: 22, fontWeight: 700 }}>{stats.win_rate.toFixed(1)}%</div>
           </div>
           <div style={{ gridColumn: 'span 2' }}>
             <div style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 1 }}>Games Played</div>

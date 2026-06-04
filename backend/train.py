@@ -52,10 +52,10 @@ def train():
     log_message(f"[Init] Device: {DEVICE.type.upper()}")
     log_message("")
 
-    games_per_iteration = 8    # More games in parallel
-    train_steps = 100          # Gradient steps per cycle
-    batch_size = 128           # Larger batch size
-    mcts_sims = 50             # Better search depth
+    games_per_iteration = 3    # Less games per cycle so it finishes faster
+    train_steps = 50           # Less gradient steps
+    batch_size = 64            
+    mcts_sims = 20             # Less lookahead so it's less CPU intensive
     iteration = 0
     prev_loss = None
     elo = 800
@@ -87,10 +87,10 @@ def train():
             elapsed = time.time() - t0
             return game_num, data, meta, elapsed
 
-        # Run games in parallel
+        # Run games in parallel with a hard limit of 2 workers to prevent PC hanging!
         futures = []
-        max_workers = min(os.cpu_count() or 4, games_per_iteration)
-        log_message(f"  [Self-Play] Using {max_workers} threads...")
+        max_workers = 2
+        log_message(f"  [Self-Play] Using {max_workers} threads to keep PC usable...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             for game_num in range(1, games_per_iteration + 1):
@@ -199,9 +199,17 @@ def train():
             }, CHECKPOINT_PATH)
             log_message(f"[Phase 2] Checkpoint saved (cycle {iteration}). LR: {scheduler.get_last_lr()[0]:.5f}")
 
-            # ELO estimation: +5 if loss decreased
-            if prev_loss is not None and total_loss_val < prev_loss:
-                elo += 5
+            # Realistic ELO estimation based on actual metrics
+            # Start at 100 (complete beginner) and scale up based on:
+            # - Lower loss = better pattern recognition
+            # - More games = more experience  
+            # - Win rate in self-play
+            loss_factor = max(0, (3.0 - total_loss_val) / 3.0) * 400  # 0-400 from loss improvement
+            experience_factor = min(len(buffer) / 50000, 1.0) * 200   # 0-200 from games played
+            win_rate = cycle_wins / max(1, cycle_wins + cycle_losses) if (cycle_wins + cycle_losses) > 0 else 0.5
+            win_factor = win_rate * 100  # 0-100 from winning
+            elo = int(100 + loss_factor + experience_factor + win_factor)
+            elo = max(100, min(elo, 1500))  # clamp to realistic range
             prev_loss = total_loss_val
         else:
             log_message(f"\n[Phase 2] Skipped — need {batch_size} positions, have {len(buffer)}")

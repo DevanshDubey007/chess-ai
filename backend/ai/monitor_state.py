@@ -57,33 +57,59 @@ def log_message(msg, cycle_number=None):
         pass
 
 
-def get_status():
-    """Return current training status string."""
-    with _lock:
-        return _current_status
+import json
+import os
 
+STATE_FILE = os.path.join(os.path.dirname(__file__), "..", "monitor_state.json")
+
+def _write_state(status, cycle):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump({"status": status, "cycle": cycle}, f)
+    except:
+        pass
+
+def _read_state():
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                return json.load(f)
+    except:
+        pass
+    return {"status": "idle", "cycle": 0}
+
+def get_status():
+    return _read_state().get("status", "idle")
 
 def set_status(s):
-    """Set current training status ('idle', 'self-play', 'training')."""
-    global _current_status
-    with _lock:
-        _current_status = s
-
+    state = _read_state()
+    _write_state(s, state.get("cycle", 0))
 
 def get_cycle():
-    """Return current cycle number."""
-    with _lock:
-        return _current_cycle
-
+    return _read_state().get("cycle", 0)
 
 def set_cycle(n):
-    """Set current cycle number."""
-    global _current_cycle
-    with _lock:
-        _current_cycle = n
-
+    state = _read_state()
+    _write_state(state.get("status", "idle"), n)
 
 def get_logs():
-    """Return a snapshot of all log entries in the deque."""
-    with _lock:
-        return list(_log_deque)
+    """Return latest 100 log entries from SQLite so API process can see them."""
+    try:
+        from db.database import SessionLocal
+        from db.monitor_models import TrainingLogLine
+        db = SessionLocal()
+        rows = db.query(TrainingLogLine).order_by(TrainingLogLine.id.desc()).limit(100).all()
+        db.close()
+        
+        # Reverse to chronological order
+        rows.reverse()
+        return [
+            {
+                "id": r.id,
+                "cycle_number": r.cycle_number,
+                "message": r.message,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else "",
+            } for r in rows
+        ]
+    except Exception:
+        return []
