@@ -18,11 +18,16 @@ training_lock = threading.Lock()
 is_training_active = False
 
 def self_play_game(model, simulations=150, verbose=True):
-    """Play one full game, return list of (tensor, policy, value) tuples."""
+    """Play one full game, return (training_data, game_metadata).
+    
+    training_data: list of (tensor, policy, value) tuples
+    game_metadata: dict with 'moves', 'result', 'move_squares' (to-square indices)
+    """
     board    = chess.Board()
     mcts     = MCTS(model, simulations=simulations, temperature=1.0)
     history  = []  # (board_tensor, move_probs)
     move_count = 0
+    move_squares = []  # destination square indices for heatmap
 
     while not board.is_game_over() and move_count < 200:
         tensor    = board_to_tensor(board)
@@ -54,7 +59,9 @@ def self_play_game(model, simulations=150, verbose=True):
                 move_uci = np.random.choice(list(visits.keys()))
 
         history.append((tensor, policy))
-        board.push(chess.Move.from_uci(move_uci))
+        move_obj = chess.Move.from_uci(move_uci)
+        move_squares.append(move_obj.to_square)  # track destination square (0-63)
+        board.push(move_obj)
         move_count += 1
 
         # Print each move so user can watch
@@ -82,7 +89,13 @@ def self_play_game(model, simulations=150, verbose=True):
         value = outcome * (1 if i % 2 == 0 else -1)
         training_data.append((tensor, policy, value))
 
-    return training_data
+    game_metadata = {
+        "moves": move_count,
+        "result": result,
+        "move_squares": move_squares,
+    }
+
+    return training_data, game_metadata
 
 def load_replay_buffer():
     if os.path.exists(REPLAY_BUFFER_PATH):
@@ -158,7 +171,7 @@ def run_self_play_cycle(games_per_cycle=3, train_steps=100):
 
         for game_num in range(games_per_cycle):
             t0   = time.time()
-            data = self_play_game(model, simulations=100) # Fast sim for local PC
+            data, _meta = self_play_game(model, simulations=100) # Fast sim for local PC
             buffer.extend(data)
             print(f"[SelfPlay] Game {game_num+1} done in {time.time()-t0:.1f}s | "
                   f"Positions: {len(data)} | Buffer: {len(buffer)}")

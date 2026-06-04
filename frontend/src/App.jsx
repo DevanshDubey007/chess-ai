@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import ChessBoardComponent from './components/ChessBoard';
 import MoveHistory from './components/MoveHistory';
 import AIStats from './components/AIStats';
@@ -34,6 +35,11 @@ function App() {
         <p style={{ color: '#9ca3af', marginTop: 8, fontSize: 14, maxWidth: 420 }}>
           Play against a neural network trained entirely through self-play using Monte Carlo Tree Search.
         </p>
+        <div style={{ marginTop: 16 }}>
+          <Link to="/monitor" className="btn btn-secondary">
+            📊 View Monitor Dashboard
+          </Link>
+        </div>
       </header>
 
       {/* Main layout */}

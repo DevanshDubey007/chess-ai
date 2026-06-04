@@ -16,3 +16,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def init_all_models():
+    """Import all model modules so their tables are registered with Base."""
+    import db.models  # noqa: F401
+    import db.monitor_models  # noqa: F401
