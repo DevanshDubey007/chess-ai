@@ -51,7 +51,7 @@ export default function MonitorApp() {
       {/* Offline Banner */}
       {isError && (
         <div className="sticky top-0 z-50 bg-[var(--color-accent-red)]/90 text-white text-center py-2 text-sm font-semibold backdrop-blur-sm">
-          ⚠️ AI Offline — Cannot reach backend at 127.0.0.1:5000
+          ⚠️ AI Offline — Cannot reach backend at {import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000'}
         </div>
       )}
 

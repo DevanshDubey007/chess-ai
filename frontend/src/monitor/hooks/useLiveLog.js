@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const LIVE_URL = 'http://127.0.0.1:5000/api/monitor/live';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+const LIVE_URL = `${API_BASE}/api/monitor/live`;
 const MAX_LINES = 100;
 const RECONNECT_DELAY = 3000;
 

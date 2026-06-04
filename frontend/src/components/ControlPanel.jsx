@@ -35,7 +35,8 @@ const ControlPanel = () => {
         <button
           onClick={async () => {
             try {
-              const res = await fetch('http://127.0.0.1:5000/api/train', { method: 'POST' });
+              const apiUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:5000';
+              const res = await fetch(`${apiUrl}/api/train`, { method: 'POST' });
               const data = await res.json();
               alert(data.status);
             } catch (e) {
